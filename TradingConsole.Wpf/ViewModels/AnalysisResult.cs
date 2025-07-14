@@ -7,7 +7,7 @@ namespace TradingConsole.Wpf.ViewModels
 {
     public class AnalysisResult : ObservableModel
     {
-        // --- ADDED: Property to control UI expansion state ---
+        // --- MODIFIED: This property now controls the expansion in the new TradeSignalView UI ---
         private bool _isExpanded;
         public bool IsExpanded
         {
@@ -15,9 +15,17 @@ namespace TradingConsole.Wpf.ViewModels
             set { if (_isExpanded != value) { _isExpanded = value; OnPropertyChanged(); } }
         }
 
-        // --- ADDED: Property to hold the reasons for the final signal ---
-        private List<string> _keySignalDrivers = new List<string>();
-        public List<string> KeySignalDrivers { get => _keySignalDrivers; set { if (_keySignalDrivers != value) { _keySignalDrivers = value; OnPropertyChanged(); } } }
+        // --- NEW: Separate lists for bullish and bearish drivers for clearer UI presentation ---
+        private List<string> _bullishDrivers = new List<string>();
+        public List<string> BullishDrivers { get => _bullishDrivers; set { if (_bullishDrivers != value) { _bullishDrivers = value; OnPropertyChanged(); } } }
+
+        private List<string> _bearishDrivers = new List<string>();
+        public List<string> BearishDrivers { get => _bearishDrivers; set { if (_bearishDrivers != value) { _bearishDrivers = value; OnPropertyChanged(); } } }
+
+
+        // --- MODIFIED: This is now a computed property based on the two new lists ---
+        public List<string> KeySignalDrivers => BullishDrivers.Concat(BearishDrivers).ToList();
+
 
         private string _securityId = string.Empty;
         private string _symbol = string.Empty;

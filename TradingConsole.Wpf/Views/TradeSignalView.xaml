@@ -4,157 +4,241 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:TradingConsole.Wpf.Views"
-             xmlns:viewmodels="clr-namespace:TradingConsole.Wpf.ViewModels"
+             xmlns:viewModels="clr-namespace:TradingConsole.Wpf.ViewModels"
              xmlns:converters="clr-namespace:TradingConsole.Wpf.Converters"
              mc:Ignorable="d" 
-             d:DataContext="{d:DesignInstance Type=viewmodels:TradeSignalViewModel, IsDesignTimeCreatable=True}"
-             d:DesignHeight="450" d:DesignWidth="800"
-             Background="#F0F2F5">
-    <UserControl.Resources>
-        <!-- This converter is needed to show the correct icon next to each driver -->
-        <converters:ValueToSignConverter x:Key="ValueToSignConverter"/>
-        <!-- This converter is used to hide the "Key Drivers" section if there are none -->
-        <converters:BooleanToVisibilityConverter x:Key="CountToVisibilityConverter" />
+             d:DataContext="{d:DesignInstance Type=viewModels:TradeSignalViewModel, IsDesignTimeCreatable=True}"
+             d:DesignHeight="450" d:DesignWidth="800" Background="#FF1E1E1E">
 
-        <Style x:Key="DriverIconStyle" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
+    <!-- MODIFIED: Added a resource dictionary to define the converters used in this file. -->
+    <UserControl.Resources>
+        <converters:BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <converters:ValueToSignConverter x:Key="ValueToSignConverter"/>
+        <local:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
+
+        <!-- Style for the Conviction Score Bar -->
+        <Style x:Key="ConvictionBarStyle" TargetType="ProgressBar">
+            <Setter Property="Height" Value="10"/>
+            <Setter Property="Minimum" Value="-10"/>
+            <Setter Property="Maximum" Value="10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid>
+                            <Rectangle Fill="#FF444444" RadiusX="5" RadiusY="5"/>
+                            <Grid ClipToBounds="True">
+                                <Rectangle x:Name="PART_Track" Fill="Transparent" />
+                                <Rectangle x:Name="PART_Indicator" HorizontalAlignment="Left" RadiusX="5" RadiusY="5"/>
+                            </Grid>
+                            <Border BorderBrush="#888" BorderThickness="1" CornerRadius="5"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Value" Value="0">
+                                <Setter TargetName="PART_Indicator" Property="Fill" Value="Gray"/>
+                            </Trigger>
+                            <Trigger Property="Value" Value="-100">
+                                <!-- Hack to check for positive/negative -->
+                                <Setter TargetName="PART_Indicator" Property="Fill" Value="#FF4CAF50"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- DataTriggers to change the progress bar color based on value -->
+        <Style x:Key="ConvictionBarConditionalStyle" TargetType="ProgressBar" BasedOn="{StaticResource ConvictionBarStyle}">
             <Style.Triggers>
-                <!-- Show an UP arrow for bullish drivers -->
-                <DataTrigger Binding="{Binding Converter={StaticResource ValueToSignConverter}, ConverterParameter='ContainsBullish'}" Value="True">
-                    <Setter Property="Text" Value="&#xE018;"/>
-                    <!-- Up arrow from Segoe MDL2 Assets -->
-                    <Setter Property="Foreground" Value="#27AE60"/>
+                <DataTrigger Binding="{Binding ConvictionScore}" Value="0">
+                    <Setter Property="Foreground" Value="Gray"/>
                 </DataTrigger>
-                <!-- Show a DOWN arrow for bearish drivers -->
-                <DataTrigger Binding="{Binding Converter={StaticResource ValueToSignConverter}, ConverterParameter='ContainsBearish'}" Value="True">
-                    <Setter Property="Text" Value="&#xE015;"/>
-                    <!-- Down arrow from Segoe MDL2 Assets -->
-                    <Setter Property="Foreground" Value="#C0392B"/>
+                <DataTrigger Binding="{Binding Path=ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Positive">
+                    <Setter Property="Foreground" Value="#FF4CAF50"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Path=ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Negative">
+                    <Setter Property="Foreground" Value="#FFF44336"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Style for the expand/collapse toggle button -->
+        <Style x:Key="ExpanderToggleStyle" TargetType="ToggleButton">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="LightGray"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent" Padding="4">
+                            <TextBlock x:Name="Glyph" Text="&#xE70E;" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Glyph" Property="Text" Value="&#xE70D;"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </UserControl.Resources>
-
     <Grid>
-        <Border Margin="20" Background="White" CornerRadius="8" Padding="20">
-            <Border.Effect>
-                <DropShadowEffect ShadowDepth="1" Color="#E0E0E0" Opacity="0.6" BlurRadius="10"/>
-            </Border.Effect>
+        <DataGrid ItemsSource="{Binding SignalResults}"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  IsReadOnly="True"
+                  AutoGenerateColumns="False"
+                  RowHeaderWidth="0"
+                  GridLinesVisibility="Horizontal"
+                  Background="Transparent"
+                  Foreground="White"
+                  BorderBrush="#FF444444"
+                  HorizontalGridLinesBrush="#FF444444"
+                  RowDetailsVisibilityMode="VisibleWhenSelected">
 
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <TextBlock Text="Index Trade Signals" FontSize="22" FontWeight="Bold" Foreground="#1C2833" Margin="0,0,0,20"/>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Background" Value="#FF2D2D30"/>
+                    <Setter Property="BorderBrush" Value="Transparent"/>
+                    <Setter Property="Margin" Value="0,1"/>
+                    <EventSetter Event="MouseLeftButtonUp" Handler="DataGridRow_MouseLeftButtonUp"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Background" Value="#FF3E3E42"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="#FF007ACC"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
 
-                    <ItemsControl ItemsSource="{Binding SignalResults}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Margin="0,0,0,20" Padding="15" CornerRadius="6" BorderThickness="1">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="BorderBrush" Value="#EAECEE"/>
-                                            <Setter Property="Background" Value="Transparent"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Buy (Calls)">
-                                                    <Setter Property="BorderBrush" Value="#2ECC71"/>
-                                                    <Setter Property="Background" Value="#F2FFF7"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Calls">
-                                                    <Setter Property="BorderBrush" Value="#ABEBC6"/>
-                                                    <Setter Property="Background" Value="#F8FFFA"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Sell (Puts)">
-                                                    <Setter Property="BorderBrush" Value="#E74C3C"/>
-                                                    <Setter Property="Background" Value="#FFF5F5"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Puts">
-                                                    <Setter Property="BorderBrush" Value="#F5B7B1"/>
-                                                    <Setter Property="Background" Value="#FFFBFB"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="#FF3E3E42"/>
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                    <Setter Property="BorderBrush" Value="#FF444444"/>
+                    <Setter Property="Padding" Value="10,5"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
 
-                                    <StackPanel>
-                                        <!-- Top Section: Symbol, Signal, Score -->
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Symbol}" FontWeight="Bold" FontSize="18" Foreground="#34495E"/>
-                                                <TextBlock Text="{Binding FinalTradeSignal}" FontSize="14" FontWeight="SemiBold">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="#566573"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Buy (Calls)">
-                                                                    <Setter Property="Foreground" Value="#27AE60"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Calls">
-                                                                    <Setter Property="Foreground" Value="#2ECC71"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Sell (Puts)">
-                                                                    <Setter Property="Foreground" Value="#C0392B"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Puts">
-                                                                    <Setter Property="Foreground" Value="#E74C3C"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-                                                <TextBlock Text="Conviction Score" FontSize="11" Foreground="#7F8C8D" HorizontalAlignment="Center"/>
-                                                <TextBlock Text="{Binding ConvictionScore}" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="#34495E"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Positive">
-                                                                    <Setter Property="Foreground" Value="#27AE60"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Negative">
-                                                                    <Setter Property="Foreground" Value="#C0392B"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding ConvictionScore}" Value="0">
-                                                                    <Setter Property="Foreground" Value="Gray"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                            </StackPanel>
-                                        </Grid>
+            <DataGrid.Columns>
+                <!-- Expander Column -->
+                <DataGridTemplateColumn>
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                          Style="{StaticResource ExpanderToggleStyle}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
 
-                                        <!-- Divider and Key Drivers Section -->
-                                        <Border BorderBrush="#EAECEE" BorderThickness="0,1,0,0" Margin="0,15,0,10" 
-                                                Visibility="{Binding KeySignalDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
+                <!-- Symbol Column -->
+                <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Padding" Value="10,5"/>
+                            <Setter Property="VerticalAlignment" Value="Center"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
 
-                                        <TextBlock Text="Key Signal Drivers:" FontSize="12" FontWeight="SemiBold" Foreground="#566573"
-                                                   Visibility="{Binding KeySignalDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}" Margin="0,0,0,5"/>
+                <!-- Signal Column -->
+                <DataGridTemplateColumn Header="Signal" Width="*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding FinalTradeSignal}" VerticalAlignment="Center" Padding="10,5">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontWeight" Value="Bold"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Buy (Calls)">
+                                                <Setter Property="Foreground" Value="#FF4CAF50"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Calls">
+                                                <Setter Property="Foreground" Value="#FF8BC34A"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Sell (Puts)">
+                                                <Setter Property="Foreground" Value="#FFF44336"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Puts">
+                                                <Setter Property="Foreground" Value="#FFFF5252"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Neutral / No Edge">
+                                                <Setter Property="Foreground" Value="Gray"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
 
-                                        <ItemsControl ItemsSource="{Binding KeySignalDrivers}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <StackPanel Orientation="Horizontal" Margin="0,1">
-                                                        <TextBlock Style="{StaticResource DriverIconStyle}" DataContext="{Binding}"/>
-                                                        <TextBlock Text="{Binding}" FontSize="12" Foreground="#34495E" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                                    </StackPanel>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </ScrollViewer>
-        </Border>
+                <!-- Conviction Score Column -->
+                <DataGridTemplateColumn Header="Conviction Score" Width="1.5*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid VerticalAlignment="Center" Margin="10,0">
+                                <ProgressBar Value="{Binding ConvictionScore}" 
+                                             Style="{StaticResource ConvictionBarConditionalStyle}"/>
+                                <TextBlock Text="{Binding ConvictionScore}" 
+                                           HorizontalAlignment="Center" 
+                                           VerticalAlignment="Center"
+                                           Foreground="White"
+                                           FontSize="10"
+                                           FontWeight="Bold">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect Color="Black" ShadowDepth="1" BlurRadius="2" Opacity="0.8"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+
+            <!-- Row Details for Signal Drivers -->
+            <DataGrid.RowDetailsTemplate>
+                <DataTemplate>
+                    <Border Background="#FF333337" Padding="20" Margin="12,0,12,10" CornerRadius="5"
+                            Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <!-- Bullish Drivers -->
+                            <TextBlock Text="Bullish Drivers" FontWeight="Bold" Foreground="#FF4CAF50" FontSize="14"
+                                       Visibility="{Binding BullishDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
+                            <ItemsControl ItemsSource="{Binding BullishDrivers}" Margin="0,5,0,0"
+                                          Visibility="{Binding BullishDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="LightGreen" TextWrapping="Wrap" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Bearish Drivers -->
+                            <TextBlock Text="Bearish Drivers" FontWeight="Bold" Foreground="#FFF44336" FontSize="14" Margin="0,15,0,0"
+                                       Visibility="{Binding BearishDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
+                            <ItemsControl ItemsSource="{Binding BearishDrivers}" Margin="0,5,0,0"
+                                          Visibility="{Binding BearishDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#FFFF8A80" TextWrapping="Wrap" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </DataGrid.RowDetailsTemplate>
+        </DataGrid>
     </Grid>
 </UserControl>

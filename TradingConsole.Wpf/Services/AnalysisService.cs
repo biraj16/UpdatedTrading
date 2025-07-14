@@ -29,6 +29,9 @@ namespace TradingConsole.Wpf.Services
         private readonly Dictionary<string, MarketProfile> _marketProfiles = new Dictionary<string, MarketProfile>();
         private readonly Dictionary<string, (bool isBreakout, bool isBreakdown)> _initialBalanceState = new();
 
+        private readonly Dictionary<string, DashboardInstrument> _instrumentCache = new();
+        private readonly Dictionary<string, RelativeStrengthState> _relativeStrengthStates = new();
+
 
         public int ShortEmaLength { get; set; }
         public int LongEmaLength { get; set; }
@@ -108,6 +111,8 @@ namespace TradingConsole.Wpf.Services
         {
             if (string.IsNullOrEmpty(instrument.SecurityId)) return;
 
+            _instrumentCache[instrument.SecurityId] = instrument;
+
             if (instrument.InstrumentType.StartsWith("OPT") && instrument.ImpliedVolatility > 0)
             {
                 var ivKey = GetHistoricalIvKey(instrument, underlyingPrice);
@@ -147,7 +152,14 @@ namespace TradingConsole.Wpf.Services
                 _multiTimeframeVwapEmaState[instrument.SecurityId] = new Dictionary<TimeSpan, EmaState>();
                 _multiTimeframeRsiState[instrument.SecurityId] = new Dictionary<TimeSpan, RsiState>();
                 _multiTimeframeAtrState[instrument.SecurityId] = new Dictionary<TimeSpan, AtrState>();
+
+                // --- THE FIX: Initialize the dictionary correctly ---
                 _multiTimeframeObvState[instrument.SecurityId] = new Dictionary<TimeSpan, ObvState>();
+
+                if (instrument.InstrumentType == "INDEX")
+                {
+                    _relativeStrengthStates[instrument.SecurityId] = new RelativeStrengthState();
+                }
 
                 _historicalMarketProfiles[instrument.SecurityId] = _marketProfileService.GetHistoricalProfiles(instrument.SecurityId);
 
@@ -184,6 +196,46 @@ namespace TradingConsole.Wpf.Services
             }
 
             RunComplexAnalysis(instrument);
+        }
+
+        private string CalculateTrend(List<decimal> history, int period)
+        {
+            if (history.Count < period) return "Neutral";
+
+            var recentHistory = history.TakeLast(period).ToList();
+            var firstHalfAvg = recentHistory.Take(period / 2).DefaultIfEmpty(0).Average();
+            var secondHalfAvg = recentHistory.Skip(period / 2).DefaultIfEmpty(0).Average();
+
+            if (secondHalfAvg > firstHalfAvg * 1.0005m) return "Trending Up";
+            if (secondHalfAvg < firstHalfAvg * 0.9995m) return "Trending Down";
+            return "Neutral";
+        }
+
+        private string RunTier1InstitutionalIntentAnalysis(DashboardInstrument spotIndex)
+        {
+            if (!_relativeStrengthStates.ContainsKey(spotIndex.SecurityId)) return "Analyzing...";
+
+            var state = _relativeStrengthStates[spotIndex.SecurityId];
+
+            var future = _instrumentCache.Values.FirstOrDefault(i => i.IsFuture && i.UnderlyingSymbol == spotIndex.Symbol);
+            if (future == null || future.Open == 0 || spotIndex.Open == 0) return "Futures Not Found";
+
+            decimal spotChange = (spotIndex.LTP - spotIndex.Open) / spotIndex.Open;
+            decimal futureChange = (future.LTP - future.Open) / future.Open;
+            decimal basisDelta = futureChange - spotChange;
+
+            state.BasisDeltaHistory.Add(basisDelta);
+            if (state.BasisDeltaHistory.Count > 30)
+            {
+                state.BasisDeltaHistory.RemoveAt(0);
+            }
+
+            string basisTrend = CalculateTrend(state.BasisDeltaHistory, 30);
+
+            if (basisTrend == "Trending Up") return "Bullish (Futures Strengthening)";
+            if (basisTrend == "Trending Down") return "Bearish (Futures Weakening)";
+
+            return "Neutral";
         }
 
         private DateTime GetPreviousTradingDay(DateTime currentDate)
@@ -530,6 +582,7 @@ namespace TradingConsole.Wpf.Services
                 if (ltp > prevVAH && currentProfile.DevelopingTpoLevels.ValueAreaLow > prevVAH) return "Acceptance > Y-VAH";
                 if (ltp < prevVAL && currentProfile.DevelopingTpoLevels.ValueAreaHigh < prevVAL) return "Acceptance < Y-VAL";
                 if (ltp > prevVAH && currentProfile.DevelopingTpoLevels.PointOfControl < prevVAH) return "Rejection at Y-VAH";
+                if (ltp < prevVAL && currentProfile.DevelopingTpoLevels.PointOfControl > prevVAL) return "Rejection at Y-VAL";
             }
 
             string ibSignal = GetInitialBalanceSignal(ltp, currentProfile, instrument.SecurityId);
@@ -603,15 +656,15 @@ namespace TradingConsole.Wpf.Services
 
             if (ltp > vahUpperBand) return "Breakout above value";
             if (ltp < valLowerBand) return "Breakdown below value";
-            if (ltp >= vahLowerBand && ltp <= vahUpperBand) return "At VAH Band";
-            if (ltp >= valLowerBand && ltp <= valUpperBand) return "At VAL Band";
+            if (ltp >= vahLowerBand && ltp <= vahUpperBand) return "At dVAH Band";
+            if (ltp >= valLowerBand && ltp <= valUpperBand) return "At dVAL Band";
 
             bool inPocBand = ltp >= pocLowerBand && ltp <= pocUpperBand;
             bool inVpocBand = volumeInfo.VolumePoc > 0 && (ltp >= vpocLowerBand && ltp <= vpocUpperBand);
 
-            if (inPocBand && inVpocBand) return "At POC & VPOC - High conviction";
-            if (inPocBand) return "At POC Band";
-            if (inVpocBand) return "At VPOC Band";
+            if (inPocBand && inVpocBand) return "At dPOC & dVPOC - High conviction";
+            if (inPocBand) return "At dPOC Band";
+            if (inVpocBand) return "At dVPOC Band";
 
             return "Inside Value Area";
         }
@@ -890,60 +943,70 @@ namespace TradingConsole.Wpf.Services
             OnAnalysisUpdated?.Invoke(result);
         }
 
-        // --- MODIFIED: This is the new, more intelligent signal synthesis logic ---
+        // --- MODIFIED: This is the new, more intelligent signal synthesis logic with weighted scoring. ---
         private void SynthesizeTradeSignal(AnalysisResult result)
         {
-            var bullishDrivers = new List<string>();
-            var bearishDrivers = new List<string>();
+            var bullishDrivers = new List<(string reason, int weight)>();
+            var bearishDrivers = new List<(string reason, int weight)>();
 
-            // --- Tier 1: Market Structure and Daily Bias (Highest Importance) ---
-            if (result.DailyBias == "Strong Bullish") bullishDrivers.Add("Opening strong above previous day's value area.");
-            if (result.DailyBias == "Strong Bearish") bearishDrivers.Add("Opening weak below previous day's value area.");
-            if (result.MarketStructure == "Trending Up") bullishDrivers.Add("Multi-day structure is trending up.");
-            if (result.MarketStructure == "Trending Down") bearishDrivers.Add("Multi-day structure is trending down.");
+            void AddBullish(string reason, int weight) => bullishDrivers.Add((reason, weight));
+            void AddBearish(string reason, int weight) => bearishDrivers.Add((reason, weight));
 
-            // --- Tier 2: Intraday Market Profile and Price Action ---
-            if (result.MarketProfileSignal == "Acceptance > Y-VAH") bullishDrivers.Add("Price accepted above yesterday's value.");
-            if (result.MarketProfileSignal == "Acceptance < Y-VAL") bearishDrivers.Add("Price accepted below yesterday's value.");
-            if (result.InitialBalanceSignal == "IB Extension Up") bullishDrivers.Add("Breaking out and extending above Initial Balance.");
-            if (result.InitialBalanceSignal == "IB Extension Down") bearishDrivers.Add("Breaking down and extending below Initial Balance.");
-            if (result.PriceVsVwapSignal == "Above VWAP") bullishDrivers.Add("Price is trading above VWAP.");
-            if (result.PriceVsVwapSignal == "Below VWAP") bearishDrivers.Add("Price is trading below VWAP.");
-            if (result.DayRangeSignal == "Near High") bullishDrivers.Add("Price is near the day's high.");
-            if (result.DayRangeSignal == "Near Low") bearishDrivers.Add("Price is near the day's low.");
+            // --- Tier 1: High-Impact (Weight 3) ---
+            if (result.MarketStructure == "Trending Up") AddBullish("Market Structure: Trending Up", 3);
+            if (result.MarketStructure == "Trending Down") AddBearish("Market Structure: Trending Down", 3);
+            if (result.DailyBias == "Strong Bullish") AddBullish("Daily Bias: Strong Bullish", 3);
+            if (result.DailyBias == "Strong Bearish") AddBearish("Daily Bias: Strong Bearish", 3);
+            if (result.MarketProfileSignal == "Acceptance > Y-VAH") AddBullish("MP: Price accepted above yesterday's value", 3);
+            if (result.MarketProfileSignal == "Acceptance < Y-VAL") AddBearish("MP: Price accepted below yesterday's value", 3);
 
-            // --- Tier 3: Momentum and Confirmation Indicators (Higher Timeframe Focus) ---
-            if (result.EmaSignal5Min == "Bullish Cross" && result.EmaSignal15Min == "Bullish Cross") bullishDrivers.Add("5m & 15m EMAs in a bullish cross.");
-            if (result.EmaSignal5Min == "Bearish Cross" && result.EmaSignal15Min == "Bearish Cross") bearishDrivers.Add("5m & 15m EMAs in a bearish cross.");
-            if (result.OiSignal == "Long Buildup") bullishDrivers.Add("Price and Open Interest rising together (Long Buildup).");
-            if (result.OiSignal == "Short Buildup") bearishDrivers.Add("Price falling while Open Interest rises (Short Buildup).");
-            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Above Close") bullishDrivers.Add("Volume spike on a positive candle.");
-            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Below Close") bearishDrivers.Add("Volume spike on a negative candle.");
-            if (result.RsiSignal5Min == "Bullish Divergence") bullishDrivers.Add("5m Bullish RSI Divergence detected.");
-            if (result.RsiSignal5Min == "Bearish Divergence") bearishDrivers.Add("5m Bearish RSI Divergence detected.");
-            if (result.CandleSignal5Min.Contains("Bullish")) bullishDrivers.Add($"5m {result.CandleSignal5Min} pattern formed.");
-            if (result.CandleSignal5Min.Contains("Bearish")) bearishDrivers.Add($"5m {result.CandleSignal5Min} pattern formed.");
+            // --- Tier 2: Medium-Impact (Weight 2) ---
+            bool mtaBullish = result.EmaSignal15Min == "Bullish Cross" && result.EmaSignal5Min == "Bullish Cross";
+            bool mtaBearish = result.EmaSignal15Min == "Bearish Cross" && result.EmaSignal5Min == "Bearish Cross";
+            if (mtaBullish) AddBullish("MTA: 5m & 15m EMAs aligned bullishly", 2);
+            if (mtaBearish) AddBearish("MTA: 5m & 15m EMAs aligned bearishly", 2);
+
+            if (result.InitialBalanceSignal == "IB Extension Up") AddBullish("IB: Extension breakout", 2);
+            if (result.InitialBalanceSignal == "IB Extension Down") AddBearish("IB: Extension breakdown", 2);
+            if (result.PriceVsVwapSignal == "Above VWAP") AddBullish("PA: Price is trading above VWAP", 2);
+            if (result.PriceVsVwapSignal == "Below VWAP") AddBearish("PA: Price is trading below VWAP", 2);
+            if (result.OiSignal == "Long Buildup") AddBullish("OI: Longs are building positions", 2);
+            if (result.OiSignal == "Short Buildup") AddBearish("OI: Shorts are building positions", 2);
+
+            // --- Tier 3: Low-Impact (Weight 1) ---
+            if (result.EmaSignal1Min == "Bullish Cross") AddBullish("MTA: 1m EMA is Bullish", 1);
+            if (result.EmaSignal1Min == "Bearish Cross") AddBearish("MTA: 1m EMA is Bearish", 1);
+            if (result.RsiSignal5Min == "Bullish Divergence") AddBullish("RSI: 5m Bullish Divergence", 1);
+            if (result.RsiSignal5Min == "Bearish Divergence") AddBearish("RSI: 5m Bearish Divergence", 1);
+            if (result.CandleSignal5Min.Contains("Bullish")) AddBullish($"Candle: 5m {result.CandleSignal5Min}", 1);
+            if (result.CandleSignal5Min.Contains("Bearish")) AddBearish($"Candle: 5m {result.CandleSignal5Min}", 1);
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Above Close") AddBullish("Vol: Spike on positive candle", 1);
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Below Close") AddBearish("Vol: Spike on negative candle", 1);
 
             // --- Final Synthesis ---
-            result.KeySignalDrivers = bullishDrivers.Concat(bearishDrivers).ToList();
-            result.ConvictionScore = bullishDrivers.Count - bearishDrivers.Count;
+            result.BullishDrivers = bullishDrivers.Select(d => $"{d.reason} (w: {d.weight})").ToList();
+            result.BearishDrivers = bearishDrivers.Select(d => $"{d.reason} (w: {d.weight})").ToList();
 
-            bool hasHighConvictionBullish = bullishDrivers.Count >= 2 && (result.DailyBias.Contains("Bullish") || result.MarketProfileSignal.Contains("Acceptance"));
-            bool hasHighConvictionBearish = bearishDrivers.Count >= 2 && (result.DailyBias.Contains("Bearish") || result.MarketProfileSignal.Contains("Acceptance"));
+            int bullishScore = bullishDrivers.Sum(d => d.weight);
+            int bearishScore = bearishDrivers.Sum(d => d.weight);
+            result.ConvictionScore = bullishScore - bearishScore;
 
-            if (hasHighConvictionBullish && result.ConvictionScore >= 3)
+            bool hasHighConvictionBullishDriver = bullishDrivers.Any(d => d.weight >= 3);
+            bool hasHighConvictionBearishDriver = bearishDrivers.Any(d => d.weight >= 3);
+
+            if (mtaBullish && hasHighConvictionBullishDriver && result.ConvictionScore >= 5)
             {
                 result.FinalTradeSignal = "Strong Buy (Calls)";
             }
-            else if (bullishDrivers.Count > bearishDrivers.Count && bullishDrivers.Count >= 2)
-            {
-                result.FinalTradeSignal = "Consider Calls";
-            }
-            else if (hasHighConvictionBearish && result.ConvictionScore <= -3)
+            else if (mtaBearish && hasHighConvictionBearishDriver && result.ConvictionScore <= -5)
             {
                 result.FinalTradeSignal = "Strong Sell (Puts)";
             }
-            else if (bearishDrivers.Count > bullishDrivers.Count && bearishDrivers.Count >= 2)
+            else if (bullishScore > bearishScore && result.ConvictionScore >= 3)
+            {
+                result.FinalTradeSignal = "Consider Calls";
+            }
+            else if (bearishScore > bullishScore && result.ConvictionScore <= -3)
             {
                 result.FinalTradeSignal = "Consider Puts";
             }

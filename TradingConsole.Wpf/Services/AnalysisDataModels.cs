@@ -53,6 +53,17 @@ namespace TradingConsole.Wpf.Services
         public decimal CurrentMovingAverage { get; set; }
     }
 
+    // --- ADDED: New class to hold state for relative strength analysis ---
+    public class RelativeStrengthState
+    {
+        // Stores the rolling history of (% Futures Change) - (% Spot Change)
+        public List<decimal> BasisDeltaHistory { get; } = new List<decimal>();
+
+        // Stores the rolling history of (% Call Change) - (% Put Change)
+        public List<decimal> OptionsDeltaHistory { get; } = new List<decimal>();
+    }
+
+
     public class IntradayIvState
     {
         public decimal DayHighIv { get; set; } = 0;
@@ -125,7 +136,6 @@ namespace TradingConsole.Wpf.Services
 
         public MarketProfileData ToMarketProfileData()
         {
-            // --- MODIFIED: Convert the detailed TPO level dictionary to a simple count dictionary for efficient storage.
             var tpoCounts = this.TpoLevels.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Count);
 
             return new MarketProfileData
@@ -133,7 +143,6 @@ namespace TradingConsole.Wpf.Services
                 Date = this.Date,
                 TpoLevelsInfo = this.DevelopingTpoLevels,
                 VolumeProfileInfo = this.DevelopingVolumeProfile,
-                // --- MODIFIED: Assign the new, compact dictionaries for serialization.
                 TpoCounts = tpoCounts,
                 VolumeLevels = new Dictionary<decimal, long>(this.VolumeLevels)
             };
