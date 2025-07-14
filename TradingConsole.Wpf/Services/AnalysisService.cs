@@ -43,8 +43,6 @@ namespace TradingConsole.Wpf.Services
         public int ObvMovingAveragePeriod { get; set; }
 
         private const int MinIvHistoryForSignal = 2;
-        // --- REMOVED: The fixed candle limit is no longer needed. ---
-        // private const int MaxCandlesToStore = 200; 
         private readonly List<TimeSpan> _timeframes = new()
         {
             TimeSpan.FromMinutes(1),
@@ -718,13 +716,10 @@ namespace TradingConsole.Wpf.Services
 
             if (currentCandle == null || currentCandle.Timestamp != candleTimestamp)
             {
-                // --- MODIFIED: Logic to handle the start of a new trading day ---
                 var lastCandleInList = candles.LastOrDefault();
                 if (lastCandleInList != null && candleTimestamp.Date > lastCandleInList.Timestamp.Date)
                 {
-                    // New day has started, clear all data from the previous day.
                     candles.Clear();
-                    // Reset all associated state objects for this timeframe and instrument.
                     _multiTimeframePriceEmaState[instrument.SecurityId][timeframe] = new EmaState();
                     _multiTimeframeVwapEmaState[instrument.SecurityId][timeframe] = new EmaState();
                     _multiTimeframeRsiState[instrument.SecurityId][timeframe] = new RsiState();
@@ -732,7 +727,6 @@ namespace TradingConsole.Wpf.Services
                     _multiTimeframeObvState[instrument.SecurityId][timeframe] = new ObvState();
                     _tickAnalysisState[instrument.SecurityId] = (0, 0, new List<decimal>());
 
-                    // Create a new market profile for the new day.
                     decimal tickSize = GetTickSize(instrument);
                     var startTime = DateTime.Today.Add(new TimeSpan(9, 15, 0));
                     _marketProfiles[instrument.SecurityId] = new MarketProfile(tickSize, startTime);
@@ -758,7 +752,6 @@ namespace TradingConsole.Wpf.Services
                 {
                     UpdateMarketProfile(instrument.SecurityId, newCandle);
                 }
-                // --- REMOVED: The fixed candle limit logic is gone.
             }
             else
             {
@@ -892,7 +885,54 @@ namespace TradingConsole.Wpf.Services
             result.DayRangeSignal = paSignals.dayRange;
             result.OpenDriveSignal = paSignals.openDrive;
 
+            SynthesizeTradeSignal(result);
+
             OnAnalysisUpdated?.Invoke(result);
+        }
+
+        private void SynthesizeTradeSignal(AnalysisResult result)
+        {
+            int score = 0;
+
+            if (result.DailyBias.Contains("Strong Bullish")) score += 5;
+            if (result.DailyBias.Contains("Strong Bearish")) score -= 5;
+            if (result.DailyBias.Contains("Bullish")) score += 3;
+            if (result.DailyBias.Contains("Bearish")) score -= 3;
+            if (result.MarketStructure == "Trending Up") score += 2;
+            if (result.MarketStructure == "Trending Down") score -= 2;
+
+            if (result.MarketProfileSignal.Contains("Acceptance > Y-VAH")) score += 4;
+            if (result.MarketProfileSignal.Contains("Acceptance < Y-VAL")) score -= 4;
+            if (result.MarketProfileSignal.Contains("Rejection at Y-VAH")) score -= 3;
+            if (result.InitialBalanceSignal.Contains("Extension Up")) score += 2;
+            if (result.InitialBalanceSignal.Contains("Extension Down")) score -= 2;
+            if (result.InitialBalanceSignal.Contains("Failed Breakout")) score -= 2;
+            if (result.InitialBalanceSignal.Contains("Failed Breakdown")) score += 2;
+
+            if (result.EmaSignal5Min == "Bullish Cross" && result.EmaSignal15Min == "Bullish Cross") score += 3;
+            if (result.EmaSignal5Min == "Bearish Cross" && result.EmaSignal15Min == "Bearish Cross") score -= 3;
+            if (result.PriceVsVwapSignal == "Above VWAP") score += 1;
+            if (result.PriceVsVwapSignal == "Below VWAP") score -= 1;
+
+            if (result.OiSignal == "Long Buildup") score += 2;
+            if (result.OiSignal == "Short Covering") score += 1;
+            if (result.OiSignal == "Short Buildup") score -= 2;
+            if (result.OiSignal == "Long Unwinding") score -= 1;
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Above Close") score += 1;
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Below Close") score -= 1;
+
+            if (result.RsiSignal5Min == "Bullish Divergence") score += 1;
+            if (result.RsiSignal5Min == "Bearish Divergence") score -= 1;
+            if (result.CandleSignal5Min.Contains("Bullish")) score += 1;
+            if (result.CandleSignal5Min.Contains("Bearish")) score -= 1;
+
+            result.ConvictionScore = score;
+
+            if (score >= 7) result.FinalTradeSignal = "Strong Buy (Calls)";
+            else if (score >= 4) result.FinalTradeSignal = "Consider Calls";
+            else if (score <= -7) result.FinalTradeSignal = "Strong Sell (Puts)";
+            else if (score <= -4) result.FinalTradeSignal = "Consider Puts";
+            else result.FinalTradeSignal = "Neutral / No Edge";
         }
 
         private string CalculateEmaSignal(string securityId, List<Candle> candles, Dictionary<string, Dictionary<TimeSpan, EmaState>> stateDictionary, bool useVwap)

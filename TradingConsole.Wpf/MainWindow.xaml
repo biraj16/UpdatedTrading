@@ -397,6 +397,9 @@
             <TabItem Header="Settings">
                 <views:SettingsView DataContext="{Binding Settings}"/>
             </TabItem>
+            <TabItem Header="Trade Signals">
+                <views:TradeSignalView DataContext="{Binding TradeSignalTab}"/>
+            </TabItem>
 
         </TabControl>
 

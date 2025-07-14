@@ -77,7 +77,6 @@ namespace TradingConsole.Wpf.ViewModels
         public decimal AvgIv { get => _avgIv; set { if (_avgIv != value) { _avgIv = value; OnPropertyChanged(); } } }
         public string IvSignal { get => _ivSignal; set { if (_ivSignal != value) { _ivSignal = value; OnPropertyChanged(); } } }
 
-        // --- MODIFIED: Renamed to reflect developing nature ---
         private decimal _developingPoc;
         public decimal DevelopingPoc { get => _developingPoc; set { if (_developingPoc != value) { _developingPoc = value; OnPropertyChanged(); } } }
         private decimal _developingVah;
@@ -93,7 +92,6 @@ namespace TradingConsole.Wpf.ViewModels
         private string _marketStructure = "N/A";
         public string MarketStructure { get => _marketStructure; set { if (_marketStructure != value) { _marketStructure = value; OnPropertyChanged(); } } }
 
-        // --- NEW: Properties for Initial Balance ---
         private decimal _initialBalanceHigh;
         public decimal InitialBalanceHigh { get => _initialBalanceHigh; set { if (_initialBalanceHigh != value) { _initialBalanceHigh = value; OnPropertyChanged(); } } }
         private decimal _initialBalanceLow;
@@ -125,6 +123,13 @@ namespace TradingConsole.Wpf.ViewModels
         public string PriceVsCloseSignal { get => _priceVsCloseSignal; set { if (_priceVsCloseSignal != value) { _priceVsCloseSignal = value; OnPropertyChanged(); } } }
         public string DayRangeSignal { get => _dayRangeSignal; set { if (_dayRangeSignal != value) { _dayRangeSignal = value; OnPropertyChanged(); } } }
         public string OpenDriveSignal { get => _openDriveSignal; set { if (_openDriveSignal != value) { _openDriveSignal = value; OnPropertyChanged(); } } }
+
+        // --- ADDED: Properties for the final synthesized trade signal ---
+        private int _convictionScore;
+        public int ConvictionScore { get => _convictionScore; set { if (_convictionScore != value) { _convictionScore = value; OnPropertyChanged(); } } }
+
+        private string _finalTradeSignal = "Analyzing...";
+        public string FinalTradeSignal { get => _finalTradeSignal; set { if (_finalTradeSignal != value) { _finalTradeSignal = value; OnPropertyChanged(); } } }
 
         public string FullGroupIdentifier
         {

@@ -42,7 +42,6 @@ namespace TradingConsole.Wpf.ViewModels
         private readonly ScripMasterService _scripMasterService;
         private readonly AnalysisService _analysisService;
         private readonly HistoricalIvService _historicalIvService;
-        // --- ADDED: Service for historical market profiles ---
         private readonly MarketProfileService _marketProfileService;
         private readonly string _dhanClientId;
         private Timer? _optionChainRefreshTimer;
@@ -65,6 +64,8 @@ namespace TradingConsole.Wpf.ViewModels
         public AnalysisService AnalysisService => _analysisService;
         public SettingsViewModel Settings { get; }
         public AnalysisTabViewModel AnalysisTab { get; }
+        // --- ADDED: ViewModel for the new Trade Signals tab ---
+        public TradeSignalViewModel TradeSignalTab { get; }
 
         public ObservableCollection<OptionChainRow> OptionChainRows { get; }
         public ObservableCollection<TickerIndex> Indices { get; }
@@ -112,7 +113,7 @@ namespace TradingConsole.Wpf.ViewModels
         }
 
         private decimal _underlyingPrice;
-        public decimal UnderlyingPrice { get => _underlyingPrice; set { if (_underlyingPrice != value) { _underlyingPrice = value; OnPropertyChanged(); OnPropertyChanged(nameof(UnderlyingPriceChange)); OnPropertyChanged(nameof(UnderlyingPriceChangePercent)); } } }
+        public decimal UnderlyingPrice { get => _underlyingPrice; set { if (_underlyingPrice != value) { _underlyingPrice = value; OnPropertyChanged(nameof(UnderlyingPriceChange)); OnPropertyChanged(nameof(UnderlyingPriceChangePercent)); } } }
         private decimal _underlyingPreviousClose;
         public decimal UnderlyingPreviousClose { get => _underlyingPreviousClose; set { if (_underlyingPreviousClose != value) { _underlyingPreviousClose = value; OnPropertyChanged(nameof(UnderlyingPriceChange)); OnPropertyChanged(nameof(UnderlyingPriceChangePercent)); } } }
         public decimal UnderlyingPriceChange => UnderlyingPrice - UnderlyingPreviousClose;
@@ -157,20 +158,20 @@ namespace TradingConsole.Wpf.ViewModels
             _webSocketClient = new DhanWebSocketClient(clientId, accessToken);
             _scripMasterService = new ScripMasterService();
             _historicalIvService = new HistoricalIvService();
-            // --- ADDED: Instantiate the new service ---
             _marketProfileService = new MarketProfileService();
 
             var settingsService = new SettingsService();
             Settings = new SettingsViewModel(settingsService);
             Settings.SettingsSaved += Settings_SettingsSaved;
 
-            // --- MODIFIED: Pass the new service to the AnalysisService constructor ---
             _analysisService = new AnalysisService(Settings, _apiClient, _scripMasterService, _historicalIvService, _marketProfileService);
             _analysisService.OnAnalysisUpdated += OnAnalysisResultUpdated;
 
             Dashboard = new DashboardViewModel();
             Portfolio = new PortfolioViewModel();
             AnalysisTab = new AnalysisTabViewModel();
+            // --- ADDED: Instantiate the new ViewModel ---
+            TradeSignalTab = new TradeSignalViewModel();
 
             Dashboard.MonitoredInstruments.CollectionChanged += (s, e) => RebuildDashboardMap();
             Portfolio.OpenPositions.CollectionChanged += (s, e) => RebuildPositionsMap();
@@ -208,7 +209,6 @@ namespace TradingConsole.Wpf.ViewModels
 
         private void Settings_SettingsSaved(object? sender, EventArgs e)
         {
-            // This now correctly calls the method on the existing _analysisService instance
             _analysisService.UpdateParametersFromSettings();
         }
 
@@ -221,6 +221,8 @@ namespace TradingConsole.Wpf.ViewModels
                     instrumentToUpdate.TradingSignal = result.EmaSignal1Min;
                 }
                 AnalysisTab.UpdateAnalysisResult(result);
+                // --- ADDED: Update the new Trade Signals tab as well ---
+                TradeSignalTab.UpdateSignalResult(result);
             });
         }
 
@@ -1498,7 +1500,6 @@ namespace TradingConsole.Wpf.ViewModels
 
             Settings.SettingsSaved -= Settings_SettingsSaved;
             _historicalIvService?.SaveDatabase();
-            // --- ADDED: Save the market profile database on exit ---
             _analysisService?.SaveMarketProfileDatabase();
         }
         #endregion
