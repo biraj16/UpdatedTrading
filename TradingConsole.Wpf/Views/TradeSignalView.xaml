@@ -4,9 +4,157 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:TradingConsole.Wpf.Views"
+             xmlns:viewmodels="clr-namespace:TradingConsole.Wpf.ViewModels"
+             xmlns:converters="clr-namespace:TradingConsole.Wpf.Converters"
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
+             d:DataContext="{d:DesignInstance Type=viewmodels:TradeSignalViewModel, IsDesignTimeCreatable=True}"
+             d:DesignHeight="450" d:DesignWidth="800"
+             Background="#F0F2F5">
+    <UserControl.Resources>
+        <!-- This converter is needed to show the correct icon next to each driver -->
+        <converters:ValueToSignConverter x:Key="ValueToSignConverter"/>
+        <!-- This converter is used to hide the "Key Drivers" section if there are none -->
+        <converters:BooleanToVisibilityConverter x:Key="CountToVisibilityConverter" />
+
+        <Style x:Key="DriverIconStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Style.Triggers>
+                <!-- Show an UP arrow for bullish drivers -->
+                <DataTrigger Binding="{Binding Converter={StaticResource ValueToSignConverter}, ConverterParameter='ContainsBullish'}" Value="True">
+                    <Setter Property="Text" Value="&#xE018;"/>
+                    <!-- Up arrow from Segoe MDL2 Assets -->
+                    <Setter Property="Foreground" Value="#27AE60"/>
+                </DataTrigger>
+                <!-- Show a DOWN arrow for bearish drivers -->
+                <DataTrigger Binding="{Binding Converter={StaticResource ValueToSignConverter}, ConverterParameter='ContainsBearish'}" Value="True">
+                    <Setter Property="Text" Value="&#xE015;"/>
+                    <!-- Down arrow from Segoe MDL2 Assets -->
+                    <Setter Property="Foreground" Value="#C0392B"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
     <Grid>
-            
+        <Border Margin="20" Background="White" CornerRadius="8" Padding="20">
+            <Border.Effect>
+                <DropShadowEffect ShadowDepth="1" Color="#E0E0E0" Opacity="0.6" BlurRadius="10"/>
+            </Border.Effect>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="Index Trade Signals" FontSize="22" FontWeight="Bold" Foreground="#1C2833" Margin="0,0,0,20"/>
+
+                    <ItemsControl ItemsSource="{Binding SignalResults}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,20" Padding="15" CornerRadius="6" BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="#EAECEE"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Buy (Calls)">
+                                                    <Setter Property="BorderBrush" Value="#2ECC71"/>
+                                                    <Setter Property="Background" Value="#F2FFF7"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Calls">
+                                                    <Setter Property="BorderBrush" Value="#ABEBC6"/>
+                                                    <Setter Property="Background" Value="#F8FFFA"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Sell (Puts)">
+                                                    <Setter Property="BorderBrush" Value="#E74C3C"/>
+                                                    <Setter Property="Background" Value="#FFF5F5"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Puts">
+                                                    <Setter Property="BorderBrush" Value="#F5B7B1"/>
+                                                    <Setter Property="Background" Value="#FFFBFB"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+
+                                    <StackPanel>
+                                        <!-- Top Section: Symbol, Signal, Score -->
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Symbol}" FontWeight="Bold" FontSize="18" Foreground="#34495E"/>
+                                                <TextBlock Text="{Binding FinalTradeSignal}" FontSize="14" FontWeight="SemiBold">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#566573"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Buy (Calls)">
+                                                                    <Setter Property="Foreground" Value="#27AE60"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Calls">
+                                                                    <Setter Property="Foreground" Value="#2ECC71"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Strong Sell (Puts)">
+                                                                    <Setter Property="Foreground" Value="#C0392B"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding FinalTradeSignal}" Value="Consider Puts">
+                                                                    <Setter Property="Foreground" Value="#E74C3C"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                <TextBlock Text="Conviction Score" FontSize="11" Foreground="#7F8C8D" HorizontalAlignment="Center"/>
+                                                <TextBlock Text="{Binding ConvictionScore}" FontSize="28" FontWeight="Bold" HorizontalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#34495E"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Positive">
+                                                                    <Setter Property="Foreground" Value="#27AE60"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding ConvictionScore, Converter={StaticResource ValueToSignConverter}}" Value="Negative">
+                                                                    <Setter Property="Foreground" Value="#C0392B"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding ConvictionScore}" Value="0">
+                                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <!-- Divider and Key Drivers Section -->
+                                        <Border BorderBrush="#EAECEE" BorderThickness="0,1,0,0" Margin="0,15,0,10" 
+                                                Visibility="{Binding KeySignalDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
+
+                                        <TextBlock Text="Key Signal Drivers:" FontSize="12" FontWeight="SemiBold" Foreground="#566573"
+                                                   Visibility="{Binding KeySignalDrivers.Count, Converter={StaticResource CountToVisibilityConverter}}" Margin="0,0,0,5"/>
+
+                                        <ItemsControl ItemsSource="{Binding KeySignalDrivers}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,1">
+                                                        <TextBlock Style="{StaticResource DriverIconStyle}" DataContext="{Binding}"/>
+                                                        <TextBlock Text="{Binding}" FontSize="12" Foreground="#34495E" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
     </Grid>
 </UserControl>

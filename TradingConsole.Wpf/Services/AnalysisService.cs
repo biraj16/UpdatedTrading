@@ -890,50 +890,69 @@ namespace TradingConsole.Wpf.Services
             OnAnalysisUpdated?.Invoke(result);
         }
 
+        // --- MODIFIED: This is the new, more intelligent signal synthesis logic ---
         private void SynthesizeTradeSignal(AnalysisResult result)
         {
-            int score = 0;
+            var bullishDrivers = new List<string>();
+            var bearishDrivers = new List<string>();
 
-            if (result.DailyBias.Contains("Strong Bullish")) score += 5;
-            if (result.DailyBias.Contains("Strong Bearish")) score -= 5;
-            if (result.DailyBias.Contains("Bullish")) score += 3;
-            if (result.DailyBias.Contains("Bearish")) score -= 3;
-            if (result.MarketStructure == "Trending Up") score += 2;
-            if (result.MarketStructure == "Trending Down") score -= 2;
+            // --- Tier 1: Market Structure and Daily Bias (Highest Importance) ---
+            if (result.DailyBias == "Strong Bullish") bullishDrivers.Add("Opening strong above previous day's value area.");
+            if (result.DailyBias == "Strong Bearish") bearishDrivers.Add("Opening weak below previous day's value area.");
+            if (result.MarketStructure == "Trending Up") bullishDrivers.Add("Multi-day structure is trending up.");
+            if (result.MarketStructure == "Trending Down") bearishDrivers.Add("Multi-day structure is trending down.");
 
-            if (result.MarketProfileSignal.Contains("Acceptance > Y-VAH")) score += 4;
-            if (result.MarketProfileSignal.Contains("Acceptance < Y-VAL")) score -= 4;
-            if (result.MarketProfileSignal.Contains("Rejection at Y-VAH")) score -= 3;
-            if (result.InitialBalanceSignal.Contains("Extension Up")) score += 2;
-            if (result.InitialBalanceSignal.Contains("Extension Down")) score -= 2;
-            if (result.InitialBalanceSignal.Contains("Failed Breakout")) score -= 2;
-            if (result.InitialBalanceSignal.Contains("Failed Breakdown")) score += 2;
+            // --- Tier 2: Intraday Market Profile and Price Action ---
+            if (result.MarketProfileSignal == "Acceptance > Y-VAH") bullishDrivers.Add("Price accepted above yesterday's value.");
+            if (result.MarketProfileSignal == "Acceptance < Y-VAL") bearishDrivers.Add("Price accepted below yesterday's value.");
+            if (result.InitialBalanceSignal == "IB Extension Up") bullishDrivers.Add("Breaking out and extending above Initial Balance.");
+            if (result.InitialBalanceSignal == "IB Extension Down") bearishDrivers.Add("Breaking down and extending below Initial Balance.");
+            if (result.PriceVsVwapSignal == "Above VWAP") bullishDrivers.Add("Price is trading above VWAP.");
+            if (result.PriceVsVwapSignal == "Below VWAP") bearishDrivers.Add("Price is trading below VWAP.");
+            if (result.DayRangeSignal == "Near High") bullishDrivers.Add("Price is near the day's high.");
+            if (result.DayRangeSignal == "Near Low") bearishDrivers.Add("Price is near the day's low.");
 
-            if (result.EmaSignal5Min == "Bullish Cross" && result.EmaSignal15Min == "Bullish Cross") score += 3;
-            if (result.EmaSignal5Min == "Bearish Cross" && result.EmaSignal15Min == "Bearish Cross") score -= 3;
-            if (result.PriceVsVwapSignal == "Above VWAP") score += 1;
-            if (result.PriceVsVwapSignal == "Below VWAP") score -= 1;
+            // --- Tier 3: Momentum and Confirmation Indicators (Higher Timeframe Focus) ---
+            if (result.EmaSignal5Min == "Bullish Cross" && result.EmaSignal15Min == "Bullish Cross") bullishDrivers.Add("5m & 15m EMAs in a bullish cross.");
+            if (result.EmaSignal5Min == "Bearish Cross" && result.EmaSignal15Min == "Bearish Cross") bearishDrivers.Add("5m & 15m EMAs in a bearish cross.");
+            if (result.OiSignal == "Long Buildup") bullishDrivers.Add("Price and Open Interest rising together (Long Buildup).");
+            if (result.OiSignal == "Short Buildup") bearishDrivers.Add("Price falling while Open Interest rises (Short Buildup).");
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Above Close") bullishDrivers.Add("Volume spike on a positive candle.");
+            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Below Close") bearishDrivers.Add("Volume spike on a negative candle.");
+            if (result.RsiSignal5Min == "Bullish Divergence") bullishDrivers.Add("5m Bullish RSI Divergence detected.");
+            if (result.RsiSignal5Min == "Bearish Divergence") bearishDrivers.Add("5m Bearish RSI Divergence detected.");
+            if (result.CandleSignal5Min.Contains("Bullish")) bullishDrivers.Add($"5m {result.CandleSignal5Min} pattern formed.");
+            if (result.CandleSignal5Min.Contains("Bearish")) bearishDrivers.Add($"5m {result.CandleSignal5Min} pattern formed.");
 
-            if (result.OiSignal == "Long Buildup") score += 2;
-            if (result.OiSignal == "Short Covering") score += 1;
-            if (result.OiSignal == "Short Buildup") score -= 2;
-            if (result.OiSignal == "Long Unwinding") score -= 1;
-            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Above Close") score += 1;
-            if (result.VolumeSignal == "Volume Burst" && result.PriceVsCloseSignal == "Below Close") score -= 1;
+            // --- Final Synthesis ---
+            result.KeySignalDrivers = bullishDrivers.Concat(bearishDrivers).ToList();
+            result.ConvictionScore = bullishDrivers.Count - bearishDrivers.Count;
 
-            if (result.RsiSignal5Min == "Bullish Divergence") score += 1;
-            if (result.RsiSignal5Min == "Bearish Divergence") score -= 1;
-            if (result.CandleSignal5Min.Contains("Bullish")) score += 1;
-            if (result.CandleSignal5Min.Contains("Bearish")) score -= 1;
+            bool hasHighConvictionBullish = bullishDrivers.Count >= 2 && (result.DailyBias.Contains("Bullish") || result.MarketProfileSignal.Contains("Acceptance"));
+            bool hasHighConvictionBearish = bearishDrivers.Count >= 2 && (result.DailyBias.Contains("Bearish") || result.MarketProfileSignal.Contains("Acceptance"));
 
-            result.ConvictionScore = score;
-
-            if (score >= 7) result.FinalTradeSignal = "Strong Buy (Calls)";
-            else if (score >= 4) result.FinalTradeSignal = "Consider Calls";
-            else if (score <= -7) result.FinalTradeSignal = "Strong Sell (Puts)";
-            else if (score <= -4) result.FinalTradeSignal = "Consider Puts";
-            else result.FinalTradeSignal = "Neutral / No Edge";
+            if (hasHighConvictionBullish && result.ConvictionScore >= 3)
+            {
+                result.FinalTradeSignal = "Strong Buy (Calls)";
+            }
+            else if (bullishDrivers.Count > bearishDrivers.Count && bullishDrivers.Count >= 2)
+            {
+                result.FinalTradeSignal = "Consider Calls";
+            }
+            else if (hasHighConvictionBearish && result.ConvictionScore <= -3)
+            {
+                result.FinalTradeSignal = "Strong Sell (Puts)";
+            }
+            else if (bearishDrivers.Count > bullishDrivers.Count && bearishDrivers.Count >= 2)
+            {
+                result.FinalTradeSignal = "Consider Puts";
+            }
+            else
+            {
+                result.FinalTradeSignal = "Neutral / No Edge";
+            }
         }
+
 
         private string CalculateEmaSignal(string securityId, List<Candle> candles, Dictionary<string, Dictionary<TimeSpan, EmaState>> stateDictionary, bool useVwap)
         {

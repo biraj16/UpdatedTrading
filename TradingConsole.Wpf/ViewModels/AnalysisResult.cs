@@ -1,4 +1,5 @@
 ﻿// In TradingConsole.Wpf/ViewModels/AnalysisResult.cs
+using System.Collections.Generic;
 using System.Linq;
 using TradingConsole.Core.Models;
 
@@ -6,6 +7,18 @@ namespace TradingConsole.Wpf.ViewModels
 {
     public class AnalysisResult : ObservableModel
     {
+        // --- ADDED: Property to control UI expansion state ---
+        private bool _isExpanded;
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set { if (_isExpanded != value) { _isExpanded = value; OnPropertyChanged(); } }
+        }
+
+        // --- ADDED: Property to hold the reasons for the final signal ---
+        private List<string> _keySignalDrivers = new List<string>();
+        public List<string> KeySignalDrivers { get => _keySignalDrivers; set { if (_keySignalDrivers != value) { _keySignalDrivers = value; OnPropertyChanged(); } } }
+
         private string _securityId = string.Empty;
         private string _symbol = string.Empty;
         private decimal _vwap;
@@ -124,7 +137,6 @@ namespace TradingConsole.Wpf.ViewModels
         public string DayRangeSignal { get => _dayRangeSignal; set { if (_dayRangeSignal != value) { _dayRangeSignal = value; OnPropertyChanged(); } } }
         public string OpenDriveSignal { get => _openDriveSignal; set { if (_openDriveSignal != value) { _openDriveSignal = value; OnPropertyChanged(); } } }
 
-        // --- ADDED: Properties for the final synthesized trade signal ---
         private int _convictionScore;
         public int ConvictionScore { get => _convictionScore; set { if (_convictionScore != value) { _convictionScore = value; OnPropertyChanged(); } } }
 
