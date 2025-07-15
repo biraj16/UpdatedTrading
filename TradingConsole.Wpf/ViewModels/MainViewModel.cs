@@ -43,8 +43,9 @@ namespace TradingConsole.Wpf.ViewModels
         private readonly AnalysisService _analysisService;
         private readonly HistoricalIvService _historicalIvService;
         private readonly MarketProfileService _marketProfileService;
-        // --- ADDED: Service for indicator state persistence ---
         private readonly IndicatorStateService _indicatorStateService;
+        // --- ADDED: Service for logging signals ---
+        private readonly SignalLoggerService _signalLoggerService;
         private readonly string _dhanClientId;
         private Timer? _optionChainRefreshTimer;
         private Timer? _ivRefreshTimer;
@@ -160,15 +161,16 @@ namespace TradingConsole.Wpf.ViewModels
             _scripMasterService = new ScripMasterService();
             _historicalIvService = new HistoricalIvService();
             _marketProfileService = new MarketProfileService();
-            // --- ADDED: Instantiate the new service ---
             _indicatorStateService = new IndicatorStateService();
+            // --- ADDED: Instantiate the new logging service ---
+            _signalLoggerService = new SignalLoggerService();
 
             var settingsService = new SettingsService();
             Settings = new SettingsViewModel(settingsService);
             Settings.SettingsSaved += Settings_SettingsSaved;
 
-            // --- MODIFIED: Pass the new service to the AnalysisService constructor ---
-            _analysisService = new AnalysisService(Settings, _apiClient, _scripMasterService, _historicalIvService, _marketProfileService, _indicatorStateService);
+            // --- MODIFIED: Pass all services to the AnalysisService constructor ---
+            _analysisService = new AnalysisService(Settings, _apiClient, _scripMasterService, _historicalIvService, _marketProfileService, _indicatorStateService, _signalLoggerService);
             _analysisService.OnAnalysisUpdated += OnAnalysisResultUpdated;
 
             Dashboard = new DashboardViewModel();
@@ -1173,8 +1175,8 @@ namespace TradingConsole.Wpf.ViewModels
                         var inst = new DashboardInstrument
                         {
                             Symbol = peInfo.SemInstrumentName,
-                            DisplayName = ceInfo.SemInstrumentName,
-                            SecurityId = ceInfo.SecurityId,
+                            DisplayName = peInfo.SemInstrumentName,
+                            SecurityId = peInfo.SecurityId,
                             FeedType = FeedTypeQuote,
                             SegmentId = optionSegmentId,
                             UnderlyingSymbol = indexInstrument.Symbol,
@@ -1502,7 +1504,6 @@ namespace TradingConsole.Wpf.ViewModels
 
             Settings.SettingsSaved -= Settings_SettingsSaved;
             _historicalIvService?.SaveDatabase();
-            // --- MODIFIED: Save all service data on exit ---
             _analysisService?.SaveMarketProfileDatabase();
             _analysisService?.SaveIndicatorStates();
         }

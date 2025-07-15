@@ -22,6 +22,7 @@ namespace TradingConsole.Wpf.Services
         private readonly HistoricalIvService _historicalIvService;
         private readonly MarketProfileService _marketProfileService;
         private readonly IndicatorStateService _indicatorStateService;
+        private readonly SignalLoggerService _signalLoggerService;
         private readonly Dictionary<string, List<MarketProfileData>> _historicalMarketProfiles = new Dictionary<string, List<MarketProfileData>>();
 
         private readonly Dictionary<string, IntradayIvState.CustomLevelState> _customLevelStates = new();
@@ -67,7 +68,7 @@ namespace TradingConsole.Wpf.Services
         public event Action<string, Candle, TimeSpan>? CandleUpdated;
         #endregion
 
-        public AnalysisService(SettingsViewModel settingsViewModel, DhanApiClient apiClient, ScripMasterService scripMasterService, HistoricalIvService historicalIvService, MarketProfileService marketProfileService, IndicatorStateService indicatorStateService)
+        public AnalysisService(SettingsViewModel settingsViewModel, DhanApiClient apiClient, ScripMasterService scripMasterService, HistoricalIvService historicalIvService, MarketProfileService marketProfileService, IndicatorStateService indicatorStateService, SignalLoggerService signalLoggerService)
         {
             _settingsViewModel = settingsViewModel;
             _apiClient = apiClient;
@@ -75,6 +76,7 @@ namespace TradingConsole.Wpf.Services
             _historicalIvService = historicalIvService;
             _marketProfileService = marketProfileService;
             _indicatorStateService = indicatorStateService;
+            _signalLoggerService = signalLoggerService;
 
             UpdateParametersFromSettings();
         }
@@ -251,8 +253,6 @@ namespace TradingConsole.Wpf.Services
             {
                 AggregateIntoCandle(instrument, timeframe);
             }
-
-            RunComplexAnalysis(instrument);
         }
 
         private string CalculateTrend(List<decimal> history, int period)
@@ -810,6 +810,7 @@ namespace TradingConsole.Wpf.Services
                 .ToList();
         }
 
+        // --- MODIFIED: This method now triggers analysis only on candle close ---
         private void AggregateIntoCandle(DashboardInstrument instrument, TimeSpan timeframe)
         {
             if (!_multiTimeframeCandles.ContainsKey(instrument.SecurityId) || !_multiTimeframeCandles[instrument.SecurityId].ContainsKey(timeframe))
@@ -822,25 +823,11 @@ namespace TradingConsole.Wpf.Services
             var candleTimestamp = new DateTime(now.Ticks - (now.Ticks % timeframe.Ticks), now.Kind);
 
             var currentCandle = candles.LastOrDefault();
-            Candle? candleToNotify = null;
 
             if (currentCandle == null || currentCandle.Timestamp != candleTimestamp)
             {
-                var lastCandleInList = candles.LastOrDefault();
-                if (lastCandleInList != null && candleTimestamp.Date > lastCandleInList.Timestamp.Date)
-                {
-                    candles.Clear();
-                    _multiTimeframePriceEmaState[instrument.SecurityId][timeframe] = new EmaState();
-                    _multiTimeframeVwapEmaState[instrument.SecurityId][timeframe] = new EmaState();
-                    _multiTimeframeRsiState[instrument.SecurityId][timeframe] = new RsiState();
-                    _multiTimeframeAtrState[instrument.SecurityId][timeframe] = new AtrState();
-                    _multiTimeframeObvState[instrument.SecurityId][timeframe] = new ObvState();
-                    _tickAnalysisState[instrument.SecurityId] = (0, 0, new List<decimal>());
-
-                    decimal tickSize = GetTickSize(instrument);
-                    var startTime = DateTime.Today.Add(new TimeSpan(9, 15, 0));
-                    _marketProfiles[instrument.SecurityId] = new MarketProfile(tickSize, startTime);
-                }
+                // This is the start of a NEW candle. The PREVIOUS candle is now closed.
+                var lastClosedCandle = currentCandle;
 
                 var newCandle = new Candle
                 {
@@ -856,15 +843,24 @@ namespace TradingConsole.Wpf.Services
                     Vwap = instrument.AvgTradePrice
                 };
                 candles.Add(newCandle);
-                candleToNotify = newCandle;
 
-                if (timeframe.TotalMinutes == 1)
+                // --- THE FIX: Run analysis on the last *closed* candle ---
+                if (lastClosedCandle != null)
                 {
-                    UpdateMarketProfile(instrument.SecurityId, newCandle);
+                    // Update market profile with the closed candle data
+                    if (timeframe.TotalMinutes == 1)
+                    {
+                        UpdateMarketProfile(instrument.SecurityId, lastClosedCandle);
+                    }
+                    // Run the main analysis logic
+                    RunComplexAnalysis(instrument);
                 }
+
+                CandleUpdated?.Invoke(instrument.SecurityId, newCandle, timeframe);
             }
             else
             {
+                // This is an update to the CURRENT, LIVE candle. Just update its values.
                 currentCandle.High = Math.Max(currentCandle.High, instrument.LTP);
                 currentCandle.Low = Math.Min(currentCandle.Low, instrument.LTP);
                 currentCandle.Close = instrument.LTP;
@@ -875,12 +871,8 @@ namespace TradingConsole.Wpf.Services
                 currentCandle.Vwap = (currentCandle.CumulativeVolume > 0)
                     ? currentCandle.CumulativePriceVolume / currentCandle.CumulativeVolume
                     : currentCandle.Close;
-                candleToNotify = currentCandle;
-            }
 
-            if (candleToNotify != null)
-            {
-                CandleUpdated?.Invoke(instrument.SecurityId, candleToNotify, timeframe);
+                CandleUpdated?.Invoke(instrument.SecurityId, currentCandle, timeframe);
             }
         }
 
@@ -960,7 +952,6 @@ namespace TradingConsole.Wpf.Services
             {
                 result.InitialBalanceSignal = GetInitialBalanceSignal(instrument.LTP, profile, instrument.SecurityId);
 
-                // --- MODIFIED: Only show developing profile values after IB is set ---
                 if (profile.IsInitialBalanceSet)
                 {
                     result.DevelopingPoc = profile.DevelopingTpoLevels.PointOfControl;
@@ -1059,6 +1050,7 @@ namespace TradingConsole.Wpf.Services
 
             int bullishScore = bullishDrivers.Sum(d => d.weight);
             int bearishScore = bearishDrivers.Sum(d => d.weight);
+            string oldSignal = result.FinalTradeSignal;
             result.ConvictionScore = bullishScore - bearishScore;
 
             bool hasHighConvictionBullishDriver = bullishDrivers.Any(d => d.weight >= 3);
@@ -1083,6 +1075,37 @@ namespace TradingConsole.Wpf.Services
             else
             {
                 result.FinalTradeSignal = "Neutral / No Edge";
+            }
+
+            result.StopLoss = 0;
+            result.TargetPrice = 0;
+            const decimal riskRewardRatio = 2.0m;
+            const decimal atrMultiplier = 1.5m;
+
+            if (result.FinalTradeSignal.StartsWith("Strong"))
+            {
+                var relevantAtr = result.Atr5Min > 0 ? result.Atr5Min : result.Atr1Min;
+                if (relevantAtr > 0 && _instrumentCache.TryGetValue(result.SecurityId, out var instrument))
+                {
+                    var lastPrice = instrument.LTP;
+                    var stopLossOffset = atrMultiplier * relevantAtr;
+
+                    if (result.FinalTradeSignal.Contains("Buy"))
+                    {
+                        result.StopLoss = lastPrice - stopLossOffset;
+                        result.TargetPrice = lastPrice + (stopLossOffset * riskRewardRatio);
+                    }
+                    else if (result.FinalTradeSignal.Contains("Sell"))
+                    {
+                        result.StopLoss = lastPrice + stopLossOffset;
+                        result.TargetPrice = lastPrice - (stopLossOffset * riskRewardRatio);
+                    }
+                }
+            }
+
+            if (result.FinalTradeSignal != oldSignal && (result.FinalTradeSignal.StartsWith("Strong")))
+            {
+                _signalLoggerService.LogSignal(result);
             }
         }
 

@@ -151,6 +151,13 @@ namespace TradingConsole.Wpf.ViewModels
         private string _finalTradeSignal = "Analyzing...";
         public string FinalTradeSignal { get => _finalTradeSignal; set { if (_finalTradeSignal != value) { _finalTradeSignal = value; OnPropertyChanged(); } } }
 
+        // --- ADDED: Properties for Stop-Loss and Target Price ---
+        private decimal _stopLoss;
+        public decimal StopLoss { get => _stopLoss; set { if (_stopLoss != value) { _stopLoss = value; OnPropertyChanged(); } } }
+
+        private decimal _targetPrice;
+        public decimal TargetPrice { get => _targetPrice; set { if (_targetPrice != value) { _targetPrice = value; OnPropertyChanged(); } } }
+
         public string FullGroupIdentifier
         {
             get
