@@ -21,6 +21,7 @@ namespace TradingConsole.Wpf.Services
         private readonly ScripMasterService _scripMasterService;
         private readonly HistoricalIvService _historicalIvService;
         private readonly MarketProfileService _marketProfileService;
+        private readonly IndicatorStateService _indicatorStateService;
         private readonly Dictionary<string, List<MarketProfileData>> _historicalMarketProfiles = new Dictionary<string, List<MarketProfileData>>();
 
         private readonly Dictionary<string, IntradayIvState.CustomLevelState> _customLevelStates = new();
@@ -66,16 +67,51 @@ namespace TradingConsole.Wpf.Services
         public event Action<string, Candle, TimeSpan>? CandleUpdated;
         #endregion
 
-        public AnalysisService(SettingsViewModel settingsViewModel, DhanApiClient apiClient, ScripMasterService scripMasterService, HistoricalIvService historicalIvService, MarketProfileService marketProfileService)
+        public AnalysisService(SettingsViewModel settingsViewModel, DhanApiClient apiClient, ScripMasterService scripMasterService, HistoricalIvService historicalIvService, MarketProfileService marketProfileService, IndicatorStateService indicatorStateService)
         {
             _settingsViewModel = settingsViewModel;
             _apiClient = apiClient;
             _scripMasterService = scripMasterService;
             _historicalIvService = historicalIvService;
             _marketProfileService = marketProfileService;
+            _indicatorStateService = indicatorStateService;
 
             UpdateParametersFromSettings();
         }
+
+        public void SaveIndicatorStates()
+        {
+            foreach (var securityId in _multiTimeframePriceEmaState.Keys)
+            {
+                foreach (var timeframe in _timeframes)
+                {
+                    var key = $"{securityId}_{timeframe.TotalMinutes}";
+
+                    var priceEmaState = _multiTimeframePriceEmaState[securityId][timeframe];
+                    var vwapEmaState = _multiTimeframeVwapEmaState[securityId][timeframe];
+                    var rsiState = _multiTimeframeRsiState[securityId][timeframe];
+                    var atrState = _multiTimeframeAtrState[securityId][timeframe];
+                    var obvState = _multiTimeframeObvState[securityId][timeframe];
+
+                    var stateToSave = new IndicatorState
+                    {
+                        LastShortEma = priceEmaState.CurrentShortEma,
+                        LastLongEma = priceEmaState.CurrentLongEma,
+                        LastVwapShortEma = vwapEmaState.CurrentShortEma,
+                        LastVwapLongEma = vwapEmaState.CurrentLongEma,
+                        LastRsiAvgGain = rsiState.AvgGain,
+                        LastRsiAvgLoss = rsiState.AvgLoss,
+                        LastAtr = atrState.CurrentAtr,
+                        LastObv = obvState.CurrentObv,
+                        LastObvMovingAverage = obvState.CurrentMovingAverage
+                    };
+
+                    _indicatorStateService.UpdateState(key, stateToSave);
+                }
+            }
+            _indicatorStateService.SaveDatabase();
+        }
+
 
         public void SaveMarketProfileDatabase()
         {
@@ -152,8 +188,6 @@ namespace TradingConsole.Wpf.Services
                 _multiTimeframeVwapEmaState[instrument.SecurityId] = new Dictionary<TimeSpan, EmaState>();
                 _multiTimeframeRsiState[instrument.SecurityId] = new Dictionary<TimeSpan, RsiState>();
                 _multiTimeframeAtrState[instrument.SecurityId] = new Dictionary<TimeSpan, AtrState>();
-
-                // --- THE FIX: Initialize the dictionary correctly ---
                 _multiTimeframeObvState[instrument.SecurityId] = new Dictionary<TimeSpan, ObvState>();
 
                 if (instrument.InstrumentType == "INDEX")
@@ -172,12 +206,35 @@ namespace TradingConsole.Wpf.Services
 
                 foreach (var tf in _timeframes)
                 {
+                    var key = $"{instrument.SecurityId}_{tf.TotalMinutes}";
+                    var savedState = _indicatorStateService.GetState(key);
+
+                    var priceEmaState = new EmaState();
+                    var vwapEmaState = new EmaState();
+                    var rsiState = new RsiState();
+                    var atrState = new AtrState();
+                    var obvState = new ObvState();
+
+                    if (savedState != null)
+                    {
+                        priceEmaState.CurrentShortEma = savedState.LastShortEma;
+                        priceEmaState.CurrentLongEma = savedState.LastLongEma;
+                        vwapEmaState.CurrentShortEma = savedState.LastVwapShortEma;
+                        vwapEmaState.CurrentLongEma = savedState.LastVwapLongEma;
+                        rsiState.AvgGain = savedState.LastRsiAvgGain;
+                        rsiState.AvgLoss = savedState.LastRsiAvgLoss;
+                        atrState.CurrentAtr = savedState.LastAtr;
+                        obvState.CurrentObv = savedState.LastObv;
+                        obvState.CurrentMovingAverage = savedState.LastObvMovingAverage;
+                        Debug.WriteLine($"[IndicatorWarmup] Loaded saved state for {key}");
+                    }
+
                     _multiTimeframeCandles[instrument.SecurityId][tf] = new List<Candle>();
-                    _multiTimeframePriceEmaState[instrument.SecurityId][tf] = new EmaState();
-                    _multiTimeframeVwapEmaState[instrument.SecurityId][tf] = new EmaState();
-                    _multiTimeframeRsiState[instrument.SecurityId][tf] = new RsiState();
-                    _multiTimeframeAtrState[instrument.SecurityId][tf] = new AtrState();
-                    _multiTimeframeObvState[instrument.SecurityId][tf] = new ObvState();
+                    _multiTimeframePriceEmaState[instrument.SecurityId][tf] = priceEmaState;
+                    _multiTimeframeVwapEmaState[instrument.SecurityId][tf] = vwapEmaState;
+                    _multiTimeframeRsiState[instrument.SecurityId][tf] = rsiState;
+                    _multiTimeframeAtrState[instrument.SecurityId][tf] = atrState;
+                    _multiTimeframeObvState[instrument.SecurityId][tf] = obvState;
                 }
 
                 if (instrument.SegmentId == 0)
@@ -901,13 +958,27 @@ namespace TradingConsole.Wpf.Services
 
             if (_marketProfiles.TryGetValue(instrument.SecurityId, out var profile))
             {
-                result.DevelopingPoc = profile.DevelopingTpoLevels.PointOfControl;
-                result.DevelopingVah = profile.DevelopingTpoLevels.ValueAreaHigh;
-                result.DevelopingVal = profile.DevelopingTpoLevels.ValueAreaLow;
-                result.DevelopingVpoc = profile.DevelopingVolumeProfile.VolumePoc;
+                result.InitialBalanceSignal = GetInitialBalanceSignal(instrument.LTP, profile, instrument.SecurityId);
+
+                // --- MODIFIED: Only show developing profile values after IB is set ---
+                if (profile.IsInitialBalanceSet)
+                {
+                    result.DevelopingPoc = profile.DevelopingTpoLevels.PointOfControl;
+                    result.DevelopingVah = profile.DevelopingTpoLevels.ValueAreaHigh;
+                    result.DevelopingVal = profile.DevelopingTpoLevels.ValueAreaLow;
+                    result.DevelopingVpoc = profile.DevelopingVolumeProfile.VolumePoc;
+                }
+                else
+                {
+                    result.DevelopingPoc = 0;
+                    result.DevelopingVah = 0;
+                    result.DevelopingVal = 0;
+                    result.DevelopingVpoc = 0;
+                }
+
                 result.InitialBalanceHigh = profile.InitialBalanceHigh;
                 result.InitialBalanceLow = profile.InitialBalanceLow;
-                result.InitialBalanceSignal = GetInitialBalanceSignal(instrument.LTP, profile, instrument.SecurityId);
+
                 var historicalProfiles = _historicalMarketProfiles.GetValueOrDefault(instrument.SecurityId);
                 result.MarketProfileSignal = GetMarketProfileSignal(instrument.LTP, profile, historicalProfiles, instrument);
                 _marketProfileService.UpdateProfile(instrument.SecurityId, profile.ToMarketProfileData());
@@ -943,7 +1014,6 @@ namespace TradingConsole.Wpf.Services
             OnAnalysisUpdated?.Invoke(result);
         }
 
-        // --- MODIFIED: This is the new, more intelligent signal synthesis logic with weighted scoring. ---
         private void SynthesizeTradeSignal(AnalysisResult result)
         {
             var bullishDrivers = new List<(string reason, int weight)>();

@@ -43,6 +43,8 @@ namespace TradingConsole.Wpf.ViewModels
         private readonly AnalysisService _analysisService;
         private readonly HistoricalIvService _historicalIvService;
         private readonly MarketProfileService _marketProfileService;
+        // --- ADDED: Service for indicator state persistence ---
+        private readonly IndicatorStateService _indicatorStateService;
         private readonly string _dhanClientId;
         private Timer? _optionChainRefreshTimer;
         private Timer? _ivRefreshTimer;
@@ -64,7 +66,6 @@ namespace TradingConsole.Wpf.ViewModels
         public AnalysisService AnalysisService => _analysisService;
         public SettingsViewModel Settings { get; }
         public AnalysisTabViewModel AnalysisTab { get; }
-        // --- ADDED: ViewModel for the new Trade Signals tab ---
         public TradeSignalViewModel TradeSignalTab { get; }
 
         public ObservableCollection<OptionChainRow> OptionChainRows { get; }
@@ -159,18 +160,20 @@ namespace TradingConsole.Wpf.ViewModels
             _scripMasterService = new ScripMasterService();
             _historicalIvService = new HistoricalIvService();
             _marketProfileService = new MarketProfileService();
+            // --- ADDED: Instantiate the new service ---
+            _indicatorStateService = new IndicatorStateService();
 
             var settingsService = new SettingsService();
             Settings = new SettingsViewModel(settingsService);
             Settings.SettingsSaved += Settings_SettingsSaved;
 
-            _analysisService = new AnalysisService(Settings, _apiClient, _scripMasterService, _historicalIvService, _marketProfileService);
+            // --- MODIFIED: Pass the new service to the AnalysisService constructor ---
+            _analysisService = new AnalysisService(Settings, _apiClient, _scripMasterService, _historicalIvService, _marketProfileService, _indicatorStateService);
             _analysisService.OnAnalysisUpdated += OnAnalysisResultUpdated;
 
             Dashboard = new DashboardViewModel();
             Portfolio = new PortfolioViewModel();
             AnalysisTab = new AnalysisTabViewModel();
-            // --- ADDED: Instantiate the new ViewModel ---
             TradeSignalTab = new TradeSignalViewModel();
 
             Dashboard.MonitoredInstruments.CollectionChanged += (s, e) => RebuildDashboardMap();
@@ -221,7 +224,6 @@ namespace TradingConsole.Wpf.ViewModels
                     instrumentToUpdate.TradingSignal = result.EmaSignal1Min;
                 }
                 AnalysisTab.UpdateAnalysisResult(result);
-                // --- ADDED: Update the new Trade Signals tab as well ---
                 TradeSignalTab.UpdateSignalResult(result);
             });
         }
@@ -1171,12 +1173,12 @@ namespace TradingConsole.Wpf.ViewModels
                         var inst = new DashboardInstrument
                         {
                             Symbol = peInfo.SemInstrumentName,
-                            DisplayName = peInfo.SemInstrumentName,
-                            SecurityId = peInfo.SecurityId,
+                            DisplayName = ceInfo.SemInstrumentName,
+                            SecurityId = ceInfo.SecurityId,
                             FeedType = FeedTypeQuote,
                             SegmentId = optionSegmentId,
                             UnderlyingSymbol = indexInstrument.Symbol,
-                            InstrumentType = peInfo.InstrumentType
+                            InstrumentType = ceInfo.InstrumentType
                         };
                         newOptionInstruments.Add(inst);
                         newSubscriptions[inst.SecurityId] = inst.SegmentId;
@@ -1500,7 +1502,9 @@ namespace TradingConsole.Wpf.ViewModels
 
             Settings.SettingsSaved -= Settings_SettingsSaved;
             _historicalIvService?.SaveDatabase();
+            // --- MODIFIED: Save all service data on exit ---
             _analysisService?.SaveMarketProfileDatabase();
+            _analysisService?.SaveIndicatorStates();
         }
         #endregion
     }

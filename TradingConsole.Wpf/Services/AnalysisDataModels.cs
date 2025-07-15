@@ -104,7 +104,7 @@ namespace TradingConsole.Wpf.Services
         {
             TickSize = tickSize;
             _sessionStartTime = sessionStartTime;
-            _initialBalanceEndTime = _sessionStartTime.AddHours(1);
+            _initialBalanceEndTime = _sessionStartTime.AddMinutes(30);
             Date = sessionStartTime.Date;
             InitialBalanceLow = decimal.MaxValue;
         }
